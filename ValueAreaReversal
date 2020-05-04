@@ -1,0 +1,73 @@
+input ValueAreaMode = {default Auto, Manual};#Hint: ValueAreaMode: Select Auto to update Value Areas automatically and is rounded to the nearest tick. Manual selection changes Value Area for today only
+
+input ProfileType = {default Volume, Time};#Hint ProfileType: Switch between Volume Profile and Time Profile
+input valueAreaPercent = 70;#Hint valueAreaPercent: Set the size of the Value Area
+
+input ShowTodayOnly = {default "No", "Yes"};#Hint ShowTodayOnly: Show/Hide chart plots for previous days
+
+input ValueAreaHigh = 2445.00;#Hint ValueAreaHigh: Enter Value Area High when ValueAreaMode is set to Manual
+input PointOfControl = 2442.00;#Hint PointOfControl: Enter Point of Control when ValueAreaMode is set to Manual
+input ValueAreaLow = 2440.00;#Hint ValueAreaLow: Enter Value Area Low when ValueAreaMode is set to Manual
+
+input ShowLabels = {default "Yes", "No"};
+
+def profiles = 1000;
+def customRowHeight = 1.0;
+def multiplier = 1;
+def onExpansion = ShowTodayOnly;
+def yyyymmdd = GetYYYYMMDD();
+def seconds = SecondsFromTime(0);
+def period = CountTradingDays(Min(First(yyyymmdd), yyyymmdd), yyyymmdd) - 1;
+def month = GetYear() * 12 + GetMonth();
+def day_number = DaysFromDate(First(yyyymmdd)) + GetDayOfWeek(First(yyyymmdd));
+def dom = GetDayOfMonth(yyyymmdd);
+def dow = GetDayOfWeek(yyyymmdd - dom + 1);
+def expthismonth = (if dow > 5 then 27 else 20) - dow;
+def exp_opt = month + (dom > expthismonth);
+def height = PricePerRow.TICKSIZE;
+
+rec count = CompoundValue(1, if period != period[1] then (count[1] + period - period[1]) % multiplier else count[1], 0);
+def cond = count < count[1] + period - period[1];
+
+def NewDay = IsNaN(close(period = “Day”)[-1]);
+
+profile tpo = if ProfileType == ProfileType.Volume then VolumeProfile("startNewProfile" = cond, "onExpansion" = onExpansion, "numberOfProfiles" = profiles, "pricePerRow" = height, "value area percent" = valueAreaPercent)
+    else TimeProfile("startNewProfile" = cond, "onExpansion" = onExpansion, "numberOfProfiles" = profiles, "pricePerRow" = height, "value area percent" = valueAreaPercent);
+
+
+rec PC = if cond == 1 then tpo.GetPointOfControl()[1] else PC[1];
+plot POC = Round(If(ValueAreaMode == ValueAreaMode."Auto", PC, if NewDay then PointOfControl else PC) / TickSize(), 0) * TickSize();
+POC.SetDefaultColor(Color.DARK_RED);
+POC.SetStyle(Curve.FIRM);
+POC.SetLineWeight(2);
+
+rec hVA = if cond == 1 then tpo.GetHighestValueArea()[1] else hVA[1];
+plot VAH = Round(If(ValueAreaMode == ValueAreaMode."Auto", hVA, if NewDay then ValueAreaHigh else hVA) / TickSize(), 0) * TickSize();
+VAH.SetDefaultColor(Color.RED);
+VAH.SetStyle(Curve.FIRM);
+
+rec lVA = if cond == 1 then tpo.GetLowestValueArea()[1] else lVA[1];
+plot VAL =  Round(If(ValueAreaMode == ValueAreaMode."Auto", lVA, if NewDay then ValueAreaLow else lVA) / TickSize(), 0) * TickSize();
+;
+VAL.SetDefaultColor(Color.GREEN);
+VAL.SetStyle(Curve.FIRM);
+
+
+
+def lr = 6 * (WMA(OHLC4, 10) - Average(OHLC4, 10)) / 9;
+def upBar = close > open;
+def dnBar = close < open;
+def short = lr > 0 && upBar && close > hVA;
+def long = lr < 0 && dnBar && close < lVA;
+
+plot TriggerLine = lr;
+AddLabel(ShowLabels, Concat("Trig:", Round(lr)), if lr < 0 then Color.GREEN else Color.RED)  ;
+#TriggerLine.addLabel(visible = true, 
+
+plot longSignal = if long && !long[1] and !long[2] then low else Double.NaN;
+plot shortSignal = if short && !short[1] and !short[2] then high else Double.NaN;
+
+longSignal.setPaintingStrategy(PaintingStrategy.ARROW_UP);
+longSignal.setDefaultColor(Color.CYAN);
+shortSignal.setPaintingStrategy(PaintingStrategy.ARROW_DOWN);
+shortSignal.setDefaultColor(Color.ORANGE);
